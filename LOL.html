@@ -9,205 +9,159 @@ content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
 html,body{
   margin:0;
+  padding:0;
   background:black;
   overflow:hidden;
   touch-action:none;
   font-family:monospace;
-  color:#00ffcc;
 }
-canvas{position:absolute;inset:0}
+canvas{
+  position:absolute;
+  inset:0;
+}
 #ui{
   position:fixed;
-  top:10px;left:10px;
-  font-size:11px;
-  text-shadow:0 0 8px #00ffcc;
-  z-index:9;
-}
-#scan{
-  position:fixed;
-  inset:0;
-  background:black;
-  color:#0f0;
+  top:10px;
+  left:10px;
+  color:#00ffcc;
   font-size:12px;
-  padding:20px;
-  display:none;
-  z-index:99;
-  animation:flicker .1s infinite;
+  text-shadow:0 0 8px #00ffcc;
+  z-index:10;
 }
-@keyframes flicker{50%{opacity:.9}}
+#hint{
+  position:fixed;
+  bottom:10px;
+  left:50%;
+  transform:translateX(-50%);
+  color:#ff00ff;
+  font-size:11px;
+  opacity:.8;
+}
 </style>
 </head>
 
 <body>
-<canvas id="c"></canvas>
-<canvas id="cam"></canvas>
+
+<canvas id="main"></canvas>
+<canvas id="cam" style="opacity:.08;mix-blend-mode:difference"></canvas>
 
 <div id="ui">
-  <div>REALITY: CORRUPTING</div>
-  <div id="mode">MODE: EVOLUTION</div>
-  <div id="count"></div>
+  <div>REALITY STATUS: UNSTABLE</div>
+  <div id="count">ENTITIES: 0</div>
 </div>
 
-<div id="scan"></div>
+<div id="hint">Tap to spawn • Camera = distortion only</div>
 
 <script>
-/* ================= CORE ================= */
-const c=document.getElementById("c"),
-ctx=c.getContext("2d"),
-cam=document.getElementById("cam"),
-camCtx=cam.getContext("2d");
+/* ================= SETUP ================= */
+const main = document.getElementById("main");
+const ctx = main.getContext("2d");
 
-let W,H,DPR=Math.min(2,devicePixelRatio||1);
+const cam = document.getElementById("cam");
+const camCtx = cam.getContext("2d");
+
+let W,H,DPR=Math.min(2,window.devicePixelRatio||1);
+
 function resize(){
-  W=innerWidth;H=innerHeight;
-  [c,cam].forEach(x=>{
-    x.width=W*DPR;x.height=H*DPR;
-    x.style.width=W+"px";x.style.height=H+"px";
-    x.getContext("2d").setTransform(DPR,0,0,DPR,0,0);
+  W=innerWidth; H=innerHeight;
+  [main,cam].forEach(c=>{
+    c.width=W*DPR;
+    c.height=H*DPR;
+    c.style.width=W+"px";
+    c.style.height=H+"px";
+    c.getContext("2d").setTransform(DPR,0,0,DPR,0,0);
   });
 }
-resize();addEventListener("resize",resize);
+resize();
+addEventListener("resize",resize);
 
-/* ================= AI ENTITY ================= */
+/* ================= ENTITY ================= */
 let entities=[];
+
 class Entity{
-  constructor(x,y,genome){
-    this.x=x;this.y=y;
-    this.vx=0;this.vy=0;
-    this.genome=genome||{
-      size:Math.random()*20+10,
-      hue:Math.random()*360,
-      aggression:Math.random(),
-      curiosity:Math.random(),
-      chaos:Math.random()
-    };
-    this.energy=1;
+  constructor(x,y){
+    this.x=x;
+    this.y=y;
+    this.vx=(Math.random()-0.5)*4;
+    this.vy=(Math.random()-0.5)*4;
+    this.size=Math.random()*18+10;
+    this.hue=Math.random()*360;
+    this.life=1;
   }
   update(){
-    // AI behavior
-    this.vx+=Math.sin(time*this.genome.curiosity+this.x*.01);
-    this.vy+=Math.cos(time*this.genome.aggression+this.y*.01);
-    this.vx+=gyroX*0.2;
-    this.vy+=gyroY*0.2;
-
-    this.x+=this.vx*0.3;
-    this.y+=this.vy*0.3;
+    this.vx+=Math.sin(this.y*0.01)*0.02;
+    this.vy+=Math.cos(this.x*0.01)*0.02;
+    this.x+=this.vx;
+    this.y+=this.vy;
 
     if(this.x<0||this.x>W)this.vx*=-1;
     if(this.y<0||this.y>H)this.vy*=-1;
 
-    this.energy-=0.0005;
-    if(this.energy<0 && Math.random()<0.02){
-      // evolution
-      this.energy=1;
-      Object.keys(this.genome).forEach(k=>{
-        this.genome[k]+= (Math.random()-.5)*0.1;
-      });
-    }
+    this.life-=0.001;
   }
   draw(){
-    ctx.fillStyle=`hsla(${this.genome.hue},100%,60%,${this.energy})`;
+    ctx.fillStyle=`hsla(${this.hue},100%,60%,${this.life})`;
     ctx.beginPath();
-    ctx.arc(this.x,this.y,this.genome.size,0,Math.PI*2);
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
     ctx.fill();
   }
 }
 
-/* ================= GLYPHS ================= */
-function drawGlyph(x,y){
-  ctx.strokeStyle="#ff00ff";
-  ctx.beginPath();
-  for(let i=0;i<6;i++){
-    ctx.lineTo(
-      x+Math.sin(i+time*.01)*20,
-      y+Math.cos(i+time*.01)*20
-    );
-  }
-  ctx.stroke();
-}
+/* ================= CAMERA DISTORTION ================= */
+let cameraStarted=false;
 
-/* ================= AUDIO ================= */
-let audioCtx, analyser, data;
-function initAudio(){
-  audioCtx=new AudioContext();
-  analyser=audioCtx.createAnalyser();
-  const osc=audioCtx.createOscillator();
-  osc.frequency.value=60;
-  osc.connect(analyser);
-  analyser.connect(audioCtx.destination);
-  osc.start();
-  data=new Uint8Array(analyser.frequencyBinCount);
-}
+function startCamera(){
+  if(cameraStarted) return;
+  cameraStarted=true;
 
-/* ================= CAMERA ================= */
-navigator.mediaDevices.getUserMedia({video:true})
-.then(s=>{
-  const v=document.createElement("video");
-  v.srcObject=s;v.play();
-  function camLoop(){
-    camCtx.globalAlpha=0.1;
-    camCtx.drawImage(v,0,0,W,H);
-    requestAnimationFrame(camLoop);
-  }
-  camLoop();
-});
+  navigator.mediaDevices.getUserMedia({video:true})
+  .then(stream=>{
+    const video=document.createElement("video");
+    video.srcObject=stream;
+    video.play();
 
-/* ================= FAKE MEMORY SCAN ================= */
-function fakeScan(){
-  const s=document.getElementById("scan");
-  s.style.display="block";
-  let i=0;
-  const interval=setInterval(()=>{
-    s.innerText+=`Scanning cache block ${i}...\n`;
-    i++;
-    if(i>40){
-      clearInterval(interval);
-      s.innerText+="MEMORY CORRUPTED\nREALITY LEAK DETECTED";
-      setTimeout(()=>s.style.display="none",1500);
+    function camLoop(){
+      camCtx.clearRect(0,0,W,H);
+      camCtx.globalAlpha=0.1;
+      camCtx.drawImage(video,0,0,W,H);
+      requestAnimationFrame(camLoop);
     }
-  },40);
+    camLoop();
+  })
+  .catch(()=>{}); // safe fail
 }
-
-/* ================= GYRO ================= */
-let gyroX=0,gyroY=0;
-addEventListener("deviceorientation",e=>{
-  gyroX=(e.gamma||0)/45;
-  gyroY=(e.beta||0)/45;
-});
 
 /* ================= INPUT ================= */
-c.addEventListener("touchstart",e=>{
-  initAudio();
-  fakeScan();
-  const t=e.touches[0];
-  entities.push(new Entity(t.clientX,t.clientY));
+main.addEventListener("pointerdown",e=>{
+  startCamera();
+  for(let i=0;i<3;i++){
+    entities.push(
+      new Entity(
+        e.clientX+(Math.random()-0.5)*20,
+        e.clientY+(Math.random()-0.5)*20
+      )
+    );
+  }
 });
 
 /* ================= LOOP ================= */
-let time=0;
-function loop(){
+function animate(){
   ctx.fillStyle="rgba(0,0,0,.25)";
   ctx.fillRect(0,0,W,H);
 
-  if(analyser){
-    analyser.getByteFrequencyData(data);
-    const amp=data[10]/255;
-    entities.forEach(e=>e.genome.size+=amp*0.5);
-  }
-
+  entities=entities.filter(e=>e.life>0);
   entities.forEach(e=>{
     e.update();
     e.draw();
-    if(Math.random()<0.01)drawGlyph(e.x,e.y);
   });
 
-  document.getElementById("count").innerText=
+  document.getElementById("count").textContent=
     "ENTITIES: "+entities.length;
 
-  time++;
-  requestAnimationFrame(loop);
+  requestAnimationFrame(animate);
 }
-loop();
+animate();
 </script>
+
 </body>
 </html>
