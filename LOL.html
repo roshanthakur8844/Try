@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Organism Runtime</title>
 
 <style>
@@ -10,13 +10,9 @@ html,body{
   margin:0;
   background:#000;
   overflow:hidden;
-  touch-action:none;
-  font-family:'Courier New',monospace;
+  font-family:monospace;
 }
-canvas{
-  position:absolute;
-  inset:0;
-}
+canvas{position:fixed;inset:0}
 #ui{
   position:fixed;
   top:10px;left:10px;
@@ -24,354 +20,105 @@ canvas{
   font-size:12px;
   text-shadow:0 0 8px #00ffcc;
   z-index:10;
-  pointer-events:none;
-  user-select:none;
 }
-#scan{
-  position:fixed;
-  inset:0;
-  background:#000;
-  color:#0f0;
-  font-size:12px;
-  padding:16px;
-  display:none;
-  z-index:20;
-  animation:flicker .12s infinite;
-  pointer-events:none;
-  white-space:pre-wrap;
-  overflow:auto;
-}
-@keyframes flicker{50%{opacity:.92}}
 </style>
 </head>
 
 <body>
 
 <canvas id="world"></canvas>
-<canvas id="distort" style="opacity:.07;mix-blend-mode:difference"></canvas>
 
 <div id="ui">
   <div>ORGANISM: ACTIVE</div>
-  <div id="stats">ENTITIES: 0 | FPS: 0</div>
-  <div>Tap to spawn entities</div>
+  <div id="stats">BOOTING…</div>
 </div>
 
-<div id="scan"></div>
-
 <script>
-/* ================= CORE ================= */
-const world = document.getElementById("world");
-const ctx = world.getContext("2d", {alpha: false});
+/* ===== CORE ===== */
+const canvas = document.getElementById("world");
+const ctx = canvas.getContext("2d");
 
-const distort = document.getElementById("distort");
-const dctx = distort.getContext("2d", {alpha: true});
-
-let W, H, DPR = Math.min(2, devicePixelRatio || 1);
-
+let W,H,DPR=Math.min(2,devicePixelRatio||1);
 function resize(){
-  W = innerWidth;
-  H = innerHeight;
-  
-  [world, distort].forEach(c => {
-    c.width = W * DPR;
-    c.height = H * DPR;
-    c.style.width = W + "px";
-    c.style.height = H + "px";
-    const context = c.getContext("2d");
-    context.setTransform(DPR, 0, 0, DPR, 0, 0);
-  });
+  W=innerWidth; H=innerHeight;
+  canvas.width=W*DPR;
+  canvas.height=H*DPR;
+  canvas.style.width=W+"px";
+  canvas.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0);
 }
+resize(); addEventListener("resize",resize);
 
-resize();
-addEventListener("resize", resize);
-
-/* ================= ENTITY AI ================= */
-let entities = [];
-const MAX_ENTITIES = 100;
-
+/* ===== ENTITY ===== */
+let entities=[];
 class Entity{
-  constructor(x, y){
-    this.x = x;
-    this.y = y;
-    this.vx = (Math.random() - 0.5) * 2;
-    this.vy = (Math.random() - 0.5) * 2;
-    this.genome = {
-      size: Math.random() * 12 + 8,
-      hue: Math.random() * 360,
-      curiosity: Math.random() * 0.5 + 0.5,
-      aggression: Math.random() * 0.3 + 0.2
-    };
-    this.energy = 1;
-    this.age = 0;
+  constructor(x,y){
+    this.x=x; this.y=y;
+    this.vx=(Math.random()-0.5)*3;
+    this.vy=(Math.random()-0.5)*3;
+    this.size=Math.random()*10+8;
+    this.hue=Math.random()*360;
+    this.energy=1;
   }
-  
-  update(deltaTime){
-    const dt = Math.min(deltaTime, 0.05); // Cap deltaTime for stability
-    
-    // Behavior based on genome
-    this.vx += Math.sin(time * this.genome.curiosity * 0.01 + this.x * 0.01) * 0.1;
-    this.vy += Math.cos(time * this.genome.aggression * 0.01 + this.y * 0.01) * 0.1;
+  update(){
+    this.vx+=Math.sin(time*0.01+this.y*0.01)*0.05;
+    this.vy+=Math.cos(time*0.01+this.x*0.01)*0.05;
+    this.x+=this.vx;
+    this.y+=this.vy;
 
-    // Gyro influence
-    this.vx += gyroX * 0.15;
-    this.vy += gyroY * 0.15;
+    if(this.x<0||this.x>W)this.vx*=-1;
+    if(this.y<0||this.y>H)this.vy*=-1;
 
-    // Apply velocity with damping
-    const damping = 0.98;
-    this.vx *= damping;
-    this.vy *= damping;
-    
-    this.x += this.vx;
-    this.y += this.vy;
-
-    // Boundary bounce with energy loss
-    if(this.x < 0 || this.x > W){
-      this.vx *= -0.8;
-      this.x = Math.max(0, Math.min(W, this.x));
-    }
-    if(this.y < 0 || this.y > H){
-      this.vy *= -0.8;
-      this.y = Math.max(0, Math.min(H, this.y));
-    }
-
-    // Energy decay
-    this.energy -= 0.0003;
-    this.age++;
-
-    // Evolution/Mutation
-    if(this.energy < 0.3 && Math.random() < 0.015){
-      this.energy = Math.min(1, this.energy + 0.5);
-      this.mutate();
-    }
+    this.energy-=0.0005;
   }
-  
-  mutate(){
-    Object.keys(this.genome).forEach(k => {
-      const mutation = (Math.random() - 0.5) * 0.15;
-      this.genome[k] = Math.max(0.1, this.genome[k] + mutation);
-      
-      // Keep values in reasonable ranges
-      if(k === 'size') this.genome[k] = Math.max(5, Math.min(25, this.genome[k]));
-      if(k === 'hue') this.genome[k] = this.genome[k] % 360;
-    });
-  }
-  
   draw(){
-    const alpha = Math.max(0, this.energy);
-    ctx.fillStyle = `hsla(${this.genome.hue}, 100%, 60%, ${alpha})`;
+    ctx.fillStyle=`hsla(${this.hue},100%,60%,${this.energy})`;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.genome.size, 0, Math.PI * 2);
+    ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
     ctx.fill();
-
-    // Draw core
-    ctx.fillStyle = `hsla(${this.genome.hue}, 100%, 80%, ${alpha * 0.5})`;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.genome.size * 0.4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Occasional glyph
-    if(Math.random() < 0.003) drawGlyph(this.x, this.y);
   }
 }
 
-/* ================= GLYPHS ================= */
-function drawGlyph(x, y){
-  ctx.strokeStyle = `rgba(255, 0, 255, ${Math.random() * 0.5 + 0.3})`;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  const sides = Math.floor(Math.random() * 3) + 4;
-  for(let i = 0; i <= sides; i++){
-    const angle = (i / sides) * Math.PI * 2 + time * 0.02;
-    const radius = 15 + Math.sin(time * 0.05) * 5;
-    ctx.lineTo(
-      x + Math.sin(angle) * radius,
-      y + Math.cos(angle) * radius
-    );
-  }
-  ctx.closePath();
-  ctx.stroke();
+/* ===== AUTO-SEED (CRITICAL FIX) ===== */
+for(let i=0;i<5;i++){
+  entities.push(new Entity(
+    Math.random()*W,
+    Math.random()*H
+  ));
 }
 
-/* ================= CAMERA DISTORTION ================= */
-let camStarted = false;
-let videoElement = null;
-
-function startCamera(){
-  if(camStarted) return;
-  camStarted = true;
-
-  navigator.mediaDevices.getUserMedia({video: {facingMode: 'user'}})
-  .then(stream => {
-    videoElement = document.createElement("video");
-    videoElement.srcObject = stream;
-    videoElement.play();
-    videoElement.style.display = 'none';
-    document.body.appendChild(videoElement);
-
-    function camLoop(){
-      if(!videoElement || videoElement.paused) return;
-      
-      dctx.clearRect(0, 0, W, H);
-      dctx.globalAlpha = 0.08;
-      
-      try {
-        dctx.drawImage(videoElement, 0, 0, W, H);
-      } catch(e) {
-        // Handle drawing errors silently
-      }
-      
-      requestAnimationFrame(camLoop);
-    }
-    
-    videoElement.addEventListener('playing', camLoop);
-  })
-  .catch(err => {
-    console.log('Camera access denied or unavailable');
-  });
-}
-
-/* ================= AUDIO (SAFE) ================= */
-let audioCtx, analyser, audioData, oscillator;
-
-function initAudio(){
-  if(audioCtx) return;
-  
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 256;
-  
-  oscillator = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  
-  oscillator.frequency.value = 40;
-  oscillator.type = 'sine';
-  gain.gain.value = 0.01; // Very quiet
-  
-  oscillator.connect(gain);
-  gain.connect(analyser);
-  analyser.connect(audioCtx.destination);
-  
-  oscillator.start();
-  
-  audioData = new Uint8Array(analyser.frequencyBinCount);
-}
-
-/* ================= FAKE MEMORY SCAN ================= */
-function fakeScan(){
-  const s = document.getElementById("scan");
-  const messages = [
-    'Initializing memory scan...',
-    'Analyzing neural pathways...',
-    'Checking genome integrity...',
-    'Validating entity matrices...',
-    'Scanning quantum fluctuations...',
-    'Detecting anomalies...',
-    'Processing temporal data...',
-    'Verifying consciousness streams...',
-    'ERROR: Unstable patterns detected',
-    'WARNING: Reality flux at 87%',
-    'ALERT: Dimensional bleed confirmed',
-    'STATUS: Containment holding'
-  ];
-  
-  s.innerText = "";
-  s.style.display = "block";
-  let i = 0;
-  
-  const t = setInterval(() => {
-    if(i < messages.length) {
-      s.innerText += messages[i] + '\n';
-      i++;
-    } else {
-      clearInterval(t);
-      s.innerText += "\n>>> SCAN COMPLETE <<<";
-      setTimeout(() => s.style.display = "none", 1500);
-    }
-  }, 80);
-}
-
-/* ================= GYRO ================= */
-let gyroX = 0, gyroY = 0;
-
-addEventListener("deviceorientation", e => {
-  if(e.gamma !== null && e.beta !== null) {
-    gyroX = Math.max(-1, Math.min(1, (e.gamma || 0) / 45));
-    gyroY = Math.max(-1, Math.min(1, (e.beta || 0) / 45));
-  }
-});
-
-/* ================= INPUT ================= */
-let interactionStarted = false;
-
-world.addEventListener("pointerdown", e => {
-  if(!interactionStarted) {
-    startCamera();
-    initAudio();
-    interactionStarted = true;
-  }
-  
-  if(Math.random() < 0.25) fakeScan();
-  
-  // Spawn entities at pointer location
-  const spawnCount = Math.min(3, MAX_ENTITIES - entities.length);
-  for(let i = 0; i < spawnCount; i++){
+/* ===== INPUT (ROBUST) ===== */
+function spawn(x,y){
+  for(let i=0;i<3;i++){
     entities.push(new Entity(
-      e.clientX + (Math.random() - 0.5) * 40,
-      e.clientY + (Math.random() - 0.5) * 40
+      x+(Math.random()-0.5)*40,
+      y+(Math.random()-0.5)*40
     ));
   }
+}
+
+canvas.addEventListener("mousedown",e=>spawn(e.clientX,e.clientY));
+canvas.addEventListener("touchstart",e=>{
+  const t=e.touches[0];
+  spawn(t.clientX,t.clientY);
 });
 
-/* ================= FPS COUNTER ================= */
-let lastTime = performance.now();
-let fps = 0;
-let frameCount = 0;
+/* ===== LOOP ===== */
+let time=0;
+function loop(){
+  ctx.fillStyle="rgba(0,0,0,0.2)";
+  ctx.fillRect(0,0,W,H);
 
-/* ================= LOOP ================= */
-let time = 0;
+  entities=entities.filter(e=>e.energy>0);
+  entities.forEach(e=>{e.update();e.draw();});
 
-function loop(currentTime){
-  const deltaTime = (currentTime - lastTime) / 1000;
-  lastTime = currentTime;
-  
-  // FPS calculation
-  frameCount++;
-  if(frameCount % 30 === 0) {
-    fps = Math.round(1 / deltaTime);
-  }
-
-  // Trail effect
-  ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
-  ctx.fillRect(0, 0, W, H);
-
-  // Audio reactivity
-  if(analyser && audioData){
-    analyser.getByteFrequencyData(audioData);
-    const amp = audioData[5] / 255;
-    entities.forEach(e => {
-      if(e.genome.size < 25) {
-        e.genome.size += amp * 0.2;
-      }
-    });
-  }
-
-  // Update and filter entities
-  entities = entities.filter(e => e.energy > 0 && e.age < 10000);
-  entities.forEach(e => {
-    e.update(deltaTime);
-    e.draw();
-  });
-
-  // Update stats
-  document.getElementById("stats").textContent = 
-    `ENTITIES: ${entities.length} | FPS: ${fps}`;
+  document.getElementById("stats").textContent=
+    `ENTITIES: ${entities.length}`;
 
   time++;
   requestAnimationFrame(loop);
 }
-
-// Start the loop
-requestAnimationFrame(loop);
+loop();
 </script>
 
 </body>
