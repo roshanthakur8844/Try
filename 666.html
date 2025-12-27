@@ -917,4 +917,101 @@
             
             let content = `
                 <div style="margin-bottom: 1.5rem;">
-                    <p><strong>Subject:</strong> ${practical
+                    <p><strong>Subject:</strong> ${practical.subject}</p>
+                    <p><strong>Date:</strong> ${practical.date}</p>
+                </div>
+                <h4>Code:</h4>
+                <div class="code-display">${escapeHtml(practical.code)}</div>
+            `;
+
+            if (practical.screenshot) {
+                content += `
+                    <h4>Screenshot:</h4>
+                    <div class="screenshot-container">
+                        <img src="${practical.screenshot}" class="screenshot-img" />
+                    </div>
+                `;
+            }
+
+            document.getElementById('modalBody').innerHTML = content;
+            document.getElementById('viewModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('viewModal').classList.remove('active');
+        }
+
+        // Delete Practical
+        function deletePractical(id) {
+            if (!confirm('Are you sure you want to delete this practical?')) return;
+            practicals = practicals.filter(p => p.id !== id);
+            savePracticals();
+            renderPracticals();
+            updateStats();
+            showToast('🗑️ Practical deleted');
+        }
+
+        // Export Practicals
+        function exportPracticals() {
+            const dataStr = JSON.stringify(practicals, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'practicals_backup.json';
+            a.click();
+
+            URL.revokeObjectURL(url);
+            showToast('📥 Export successful');
+        }
+
+        // Import Practicals
+        function importPracticals(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const imported = JSON.parse(reader.result);
+                    if (!Array.isArray(imported)) throw new Error();
+                    practicals = imported;
+                    savePracticals();
+                    renderPracticals();
+                    updateStats();
+                    showToast('📤 Import successful');
+                } catch {
+                    showToast('❌ Invalid file', true);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Update Statistics
+        function updateStats() {
+            document.getElementById('totalCount').textContent = practicals.length;
+            const subjects = new Set(practicals.map(p => p.subject));
+            document.getElementById('subjectCount').textContent = subjects.size;
+        }
+
+        // Toast Notification
+        function showToast(message, isError = false) {
+            const toast = document.createElement('div');
+            toast.className = 'toast' + (isError ? ' error' : '');
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+        }
+    </script>
+</body>
+</html>
